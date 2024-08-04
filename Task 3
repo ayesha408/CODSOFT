@@ -1,0 +1,61 @@
+import pandas as pd
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.model_selection import train_test_split
+from zipfile import ZipFile
+import requests # type: ignore
+import io
+
+# Download the dataset
+url = "https://files.grouplens.org/datasets/movielens/ml-latest-small.zip"
+response = requests.get(url)
+zip_file = ZipFile(io.BytesIO(response.content))
+
+# Extract specific files from the ZIP archive
+ratings_file = zip_file.open('ml-latest-small/ratings.csv')
+movies_file = zip_file.open('ml-latest-small/movies.csv')
+
+# Load the ratings and movies data into DataFrames
+ratings = pd.read_csv(ratings_file, sep=',', encoding='latin-1')
+movies = pd.read_csv(movies_file, sep=',', encoding='latin-1')
+
+# Create a user-item matrix
+user_item_matrix = ratings.pivot(index='userId', columns='movieId', values='rating')
+
+# Fill NaN values with 0s
+user_item_matrix = user_item_matrix.fillna(0)
+
+# Compute the cosine similarity matrix
+user_similarity = cosine_similarity(user_item_matrix)
+user_similarity_df = pd.DataFrame(user_similarity, index=user_item_matrix.index, columns=user_item_matrix.index)
+
+# Function to recommend movies
+def recommend_movies(user_id, num_recommendations=5):
+    user_ratings = user_item_matrix.loc[user_id]
+    similar_users = user_similarity_df[user_id].sort_values(ascending=False)
+    
+    recommended_movies = pd.Series(dtype='float64')
+    
+    for similar_user in similar_users.index:
+        if similar_user == user_id:
+            continue
+        similar_user_ratings = user_item_matrix.loc[similar_user]
+        for movie_id, rating in similar_user_ratings.items():
+            if user_ratings[movie_id] == 0 and rating > 0:
+                if movie_id not in recommended_movies:
+                    recommended_movies[movie_id] = rating
+                else:
+                    recommended_movies[movie_id] += rating
+    
+    recommended_movies = recommended_movies.sort_values(ascending=False)
+    recommended_movies = recommended_movies.head(num_recommendations)
+    
+    recommended_movie_titles = movies[movies['movieId'].isin(recommended_movies.index)]['title']
+    return recommended_movie_titles
+
+# Example usage
+user_id = 1
+num_recommendations = 5
+recommendations = recommend_movies(user_id, num_recommendations)
+print(f"Top {num_recommendations} movie recommendations for user {user_id}:")
+print(recommendations)
